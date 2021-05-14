@@ -16,8 +16,8 @@
 
 #include <PDM.h>
 
-#define DEBUG 1
-
+#define SERIAL_DEBUG 0
+#define DISPLAY_PAGE_MAX 3
 void vGet_Temp_Hum_Val(float *tem, float *hum); //温湿度的读取
 void vGet_Press(float *press);                  //获取气压
 void onPDMdata();
@@ -51,21 +51,27 @@ void setup()
     //初始化温度湿度传感器
     if (!HTS.begin())
     { //HTS温湿度传感器初始化
+#if SERIAL_DEBUG   
         Serial.println("Failed to initialize humidity temperature sensor!");
+#endif // SERIAL_DEBUG  
         while (1)
             ;
     }
     //初始化气压传感器
     if (!BARO.begin())
     {
+#if SERIAL_DEBUG          
         Serial.println("Failed to initialize pressure sensor!");
+#endif
         while (1)
             ;
     }
     //初始化颜色传感器
     if (!APDS.begin())
     {
+#if SERIAL_DEBUG          
         Serial.println("Error initializing APDS9960 sensor.");
+#endif
     }
 
     u8g2.begin();
@@ -75,18 +81,35 @@ void setup()
 float f_tem = 0;
 float f_hum = 0;
 float f_press = 0;
+
+unsigned int ui_press = 0;
+unsigned int ui_decibel = 0;
+unsigned char uc_page = 0,sec_flag;
 void loop()
 {
     // put your main code here, to run repeatedly:
 
     vGet_Temp_Hum_Val(&f_tem, &f_hum); //临时温湿度的读取
     vGet_Press(&f_press);              //临时气压值读取
-    uiGet_Bright();
-    vDisplay_test(); //显示函数
-    uiGet_PCM_data();
+    ui_press = uiGet_Bright();         //临时亮度读取 
+    //vDisplay_test(); //显示函数
+    ui_decibel = uiGet_PCM_data();     //临时分贝获取
+
+    //vDisplay_normal(float tem, float hum, float press, unsigned int bright, int decibel)
+    vDisplay_normal(uc_page, f_tem, f_hum, f_press, ui_press, ui_decibel);
     //vRGB2Bright(int r_val, int g_val, int b_val)
     // wait 1 second to print again
 
+    sec_flag++;
+    if(sec_flag >= 3)               //
+    {
+        sec_flag = 0;
+        uc_page++;
+        if(uc_page >= DISPLAY_PAGE_MAX+1)
+        {
+            uc_page = 0;
+        }
+    }
     delay(1000);
 }
 
@@ -100,7 +123,7 @@ unsigned int uiGet_Bright() //获取亮度值
     }
     APDS.readColor(r, g, b);
 
-#if DEBUG
+#if SERIAL_DEBUG  
     // print the values
     Serial.print("r = ");
     Serial.println(r);
@@ -111,19 +134,21 @@ unsigned int uiGet_Bright() //获取亮度值
     Serial.println();
 #endif
     ret = uiRGB2Bright(r, g, b);
+#if SERIAL_DEBUG      
     Serial.print("bright = ");
     Serial.println(ret);
+#endif    
     return ret;
 }
 
 void vGet_Temp_Hum_Val(float *tem, float *hum)
 {
-    float temperature = HTS.readTemperature(FAHRENHEIT);
+    float temperature = HTS.readTemperature();
     float humidity = HTS.readHumidity();
 
     *tem = temperature;
     *hum = humidity;
-
+#if SERIAL_DEBUG  
     // print each of the sensor values
     Serial.print("Temperature = ");
     Serial.print(temperature);
@@ -135,6 +160,7 @@ void vGet_Temp_Hum_Val(float *tem, float *hum)
 
     // print an empty line
     Serial.println();
+#endif    
 }
 
 void vGet_Press(float *press)
@@ -142,7 +168,7 @@ void vGet_Press(float *press)
     float pressure = BARO.readPressure(PSI);
 
     *press = pressure;
-
+#if SERIAL_DEBUG  
     // print the sensor value
     Serial.print("Pressure = ");
     Serial.print(pressure);
@@ -150,6 +176,7 @@ void vGet_Press(float *press)
 
     // print an empty line
     Serial.println();
+#endif
 }
 
 unsigned int uiRGB2Bright(int r_val, int g_val, int b_val)
@@ -170,6 +197,7 @@ void vDisplay_test()
 
 /**
  * @brief: OLED显示屏显示
+ * @param:[IN] page:显示页面
  * @param:[IN] tem:温度数据
  * @param:[IN] hum:温度数据
  * @param:[IN] press:压强数据
@@ -177,10 +205,39 @@ void vDisplay_test()
  * @param:[IN] decibel:声音平均
  * @retval: none
  */ 
-void vDisplay_normal(float tem, float hum, float press, unsigned int bright, int decibel)
+void vDisplay_normal(unsigned char page,float tem, float hum, float press, unsigned int bright, int decibel)
 {
+    char line0_buf[128] = {0};
+    char line1_buf[128] = {0};
+    char line2_buf[128] = {0};
+    if(page == 0)                                   //tem  hum
+    {
+        sprintf(line0_buf,"tem: %.2f ",tem);
+        sprintf(line1_buf,"hum: %.2f ",hum);
+    }
+    else if(page == 1)
+    {
+        sprintf(line0_buf,"press:");
+        sprintf(line1_buf,"              %.2f ",press);        
+    }
+    else if(page == 2)
+    {
+        sprintf(line0_buf,"bright:");
+        sprintf(line1_buf,"                   %d ",bright);        
+    }
+    else if(page == 3)
+    {
+        sprintf(line0_buf,"decibel:");
+        sprintf(line1_buf,"                   %d ",decibel);        
+    }
 
+    u8g2.clearBuffer();                  // clear the internal memory
+    
+    u8g2.setFont(u8g2_font_tenfatguys_tf);  // choose a suitable font  //https://github.com/olikraus/u8g2/wiki/fntlistall
 
+    u8g2.drawStr(0, 15, line0_buf); // write something to the internal memory
+    u8g2.drawStr(0, 30, line1_buf);
+    u8g2.sendBuffer();                   // transfer internal memory to the display
 }
 
 /**
@@ -202,7 +259,9 @@ void vPDM_init()
   // - a 16 kHz sample rate for the Arduino Nano 33 BLE Sense
   // - a 32 kHz or 64 kHz sample rate for the Arduino Portenta Vision Shield
   if (!PDM.begin(1, 16000)) {
+#if SERIAL_DEBUG        
     Serial.println("Failed to start PDM!");
+#endif    
   }
 }
 
@@ -217,8 +276,10 @@ unsigned int uiGet_PCM_data()
     if (pdmSize) {
     //   Serial.println(PCM2DecibelRMS(pdmBuffer, pdmSize));
         data = PCM2Decibel(pdmBuffer, pdmSize);
+#if SERIAL_DEBUG          
         Serial.print("PCM data:");
         Serial.println(data);
+#endif        
         pdmSize = 0;
     }
     else
