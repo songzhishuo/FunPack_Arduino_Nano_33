@@ -1,8 +1,8 @@
 //任务目的：利用NANO-33 BLE的传感器，搭建一个小型环境监测站用于监测户外环境。待监测的参数包括：
 //
 //· 周边环境温度（精度：±0.1°C, ±0.1°F）     //HTS221
-//· 周边环境湿度（精度：±1%）                
-//· 大气压强（精度：±0.1kPa, ±0.1psi）      //LPS22HB    
+//· 周边环境湿度（精度：±1%）
+//· 大气压强（精度：±0.1kPa, ±0.1psi）      //LPS22HB
 //· 日照强度（用于判断白天/夜晚）
 //· 周边平均噪声（精度：±1dB）
 
@@ -10,69 +10,96 @@
 #include <Arduino_LPS22HB.h>
 #include <Arduino_APDS9960.h>
 
+#include <Arduino.h>
+#include <U8g2lib.h>
+#include <Wire.h>
+
+#include <PDM.h>
+
 #define DEBUG 1
 
-void vGet_Temp_Hum_Val(float *tem, float * hum);      //温湿度的读取
-void vGet_Press(float *press);                        //获取气压
-
+void vGet_Temp_Hum_Val(float *tem, float *hum); //温湿度的读取
+void vGet_Press(float *press);                  //获取气压
+void onPDMdata();
 /*OLED初始化 U8G2*/
-U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);  // Adafruit ESP8266/32u4/ARM Boards + FeatherWing OLED
+U8G2_SSD1306_128X32_UNIVISION_F_HW_I2C u8g2(U8G2_R0, /* reset=*/U8X8_PIN_NONE); // Adafruit ESP8266/32u4/ARM Boards + FeatherWing OLED
 
-void setup() {
-  // put your setup code here, to run once:
 
-//初始化声音传感器
-//PDM.onReceive(onPDMdata);
-//PDM.begin(1, 16000);
+/*音频相关参数*/
+boolean isPDMReady = false;
+short pdmBuffer[512];
+volatile int pdmSize;
 
-//初始化串口
-Serial.begin(9600);
-while (!Serial);
 
- //初始化温度湿度传感器
-  if (!HTS.begin()) {           //HTS温湿度传感器初始化 
-    Serial.println("Failed to initialize humidity temperature sensor!");
-    while (1);
-  }
-  //初始化气压传感器
-  if (!BARO.begin()) {
-    Serial.println("Failed to initialize pressure sensor!");
-    while (1);
-  }
-//初始化颜色传感器
-if (!APDS.begin()) {
-    Serial.println("Error initializing APDS9960 sensor.");
-  }
 
-u8g2.begin();
-u8g2.enableUTF8Print();		// enable UTF8 support for the Arduino print() function
+void setup()
+{
+    // put your setup code here, to run once:
 
+    //初始化声音传感器
+    //PDM.onReceive(onPDMdata);
+    //PDM.begin(1, 16000);
+
+    //初始化串口
+    Serial.begin(9600);
+    while (!Serial)
+        ;
+
+    //麦克风音频初始化
+    vPDM_init();
+
+    //初始化温度湿度传感器
+    if (!HTS.begin())
+    { //HTS温湿度传感器初始化
+        Serial.println("Failed to initialize humidity temperature sensor!");
+        while (1)
+            ;
+    }
+    //初始化气压传感器
+    if (!BARO.begin())
+    {
+        Serial.println("Failed to initialize pressure sensor!");
+        while (1)
+            ;
+    }
+    //初始化颜色传感器
+    if (!APDS.begin())
+    {
+        Serial.println("Error initializing APDS9960 sensor.");
+    }
+
+    u8g2.begin();
+    u8g2.enableUTF8Print(); // enable UTF8 support for the Arduino print() function
 }
 
 float f_tem = 0;
 float f_hum = 0;
 float f_press = 0;
-void loop() {
-  // put your main code here, to run repeatedly:
-  
-  vGet_Temp_Hum_Val(&f_tem, &f_hum);             //临时温湿度的读取
-  vGet_Press(&f_press);                           //临时气压值读取  
-  uiGet_Bright();
-  //vRGB2Bright(int r_val, int g_val, int b_val)
-  // wait 1 second to print again
-  delay(1000);
+void loop()
+{
+    // put your main code here, to run repeatedly:
+
+    vGet_Temp_Hum_Val(&f_tem, &f_hum); //临时温湿度的读取
+    vGet_Press(&f_press);              //临时气压值读取
+    uiGet_Bright();
+    vDisplay_test(); //显示函数
+    uiGet_PCM_data();
+    //vRGB2Bright(int r_val, int g_val, int b_val)
+    // wait 1 second to print again
+
+    delay(1000);
 }
 
-unsigned int uiGet_Bright()             //获取亮度值
+unsigned int uiGet_Bright() //获取亮度值
 {
     int r, g, b;
     unsigned int ret = 0;
-    while (! APDS.colorAvailable()) 
+    while (!APDS.colorAvailable())
     {
         delay(5);
     }
     APDS.readColor(r, g, b);
-    
+
 #if DEBUG
     // print the values
     Serial.print("r = ");
@@ -89,48 +116,157 @@ unsigned int uiGet_Bright()             //获取亮度值
     return ret;
 }
 
-void vGet_Temp_Hum_Val(float *tem, float * hum)
+void vGet_Temp_Hum_Val(float *tem, float *hum)
 {
-  float temperature = HTS.readTemperature(FAHRENHEIT);
-  float humidity    = HTS.readHumidity();
+    float temperature = HTS.readTemperature(FAHRENHEIT);
+    float humidity = HTS.readHumidity();
 
-  *tem = temperature;
-  *hum  = humidity;
-  
-  // print each of the sensor values
-  Serial.print("Temperature = ");
-  Serial.print(temperature);
-  Serial.println(" °F");
+    *tem = temperature;
+    *hum = humidity;
 
-  Serial.print("Humidity    = ");
-  Serial.print(humidity);
-  Serial.println(" %");
+    // print each of the sensor values
+    Serial.print("Temperature = ");
+    Serial.print(temperature);
+    Serial.println(" °F");
 
-  // print an empty line
-  Serial.println();  
+    Serial.print("Humidity    = ");
+    Serial.print(humidity);
+    Serial.println(" %");
+
+    // print an empty line
+    Serial.println();
 }
 
 void vGet_Press(float *press)
 {
-  float pressure = BARO.readPressure(PSI);
+    float pressure = BARO.readPressure(PSI);
 
-  *press = pressure;
+    *press = pressure;
 
-  // print the sensor value
-  Serial.print("Pressure = ");
-  Serial.print(pressure);
-  Serial.println(" psi");
+    // print the sensor value
+    Serial.print("Pressure = ");
+    Serial.print(pressure);
+    Serial.println(" psi");
 
-  // print an empty line
-  Serial.println();  
+    // print an empty line
+    Serial.println();
 }
 
 unsigned int uiRGB2Bright(int r_val, int g_val, int b_val)
 {
-  int Y;
-  Y = ((r_val*299)+(g_val*587)+(b_val*114))/1000;
-  return Y;
+    int Y;
+    Y = ((r_val * 299) + (g_val * 587) + (b_val * 114)) / 1000;
+    return Y;
 }
+
+void vDisplay_test()
+{
+    u8g2.clearBuffer();                  // clear the internal memory
+    u8g2.setFont(u8g2_font_ncenB08_tr);  // choose a suitable font
+    u8g2.drawStr(0, 10, "Hello World!"); // write something to the internal memory
+    u8g2.sendBuffer();                   // transfer internal memory to the display
+}
+
+
+/**
+ * @brief: OLED显示屏显示
+ * @param:[IN] tem:温度数据
+ * @param:[IN] hum:温度数据
+ * @param:[IN] press:压强数据
+ * @param:[IN] bright:亮度数据
+ * @param:[IN] decibel:声音平均
+ * @retval: none
+ */ 
+void vDisplay_normal(float tem, float hum, float press, unsigned int bright, int decibel)
+{
+
+
+}
+
+/**
+ * @brief: 音频初始化
+ * @param: none
+ * @retval: none
+ */ 
+void vPDM_init()
+{
+  // Configure the data receive callback
+  PDM.onReceive(onPDMdata);
+
+  // Optionally set the gain
+  // Defaults to 20 on the BLE Sense and -10 on the Portenta Vision Shield
+  // PDM.setGain(30);
+
+  // Initialize PDM with:
+  // - one channel (mono mode)
+  // - a 16 kHz sample rate for the Arduino Nano 33 BLE Sense
+  // - a 32 kHz or 64 kHz sample rate for the Arduino Portenta Vision Shield
+  if (!PDM.begin(1, 16000)) {
+    Serial.println("Failed to start PDM!");
+  }
+}
+
+/**
+ * @brief: 获取音频数据
+ * @param: none
+ * @retval: 音频分贝
+ */ 
+unsigned int uiGet_PCM_data()
+{
+    unsigned int data = 0;
+    if (pdmSize) {
+    //   Serial.println(PCM2DecibelRMS(pdmBuffer, pdmSize));
+        data = PCM2Decibel(pdmBuffer, pdmSize);
+        Serial.print("PCM data:");
+        Serial.println(data);
+        pdmSize = 0;
+    }
+    else
+    {
+        data = 0;
+    }
+
+    return data;
+}
+
+
+void onPDMdata() {
+  int bytesAvailable = PDM.available();
+  PDM.read(pdmBuffer, bytesAvailable);
+  pdmSize = bytesAvailable / 2; // 16-bit, 2 bytes per sample
+}
+
+/** 
+ * Reference: https://en.wikipedia.org/wiki/Decibel
+ * @param pcmData
+ * @param pcmSize 
+ * @return 
+ */  
+int PCM2DecibelRMS(const short *pcmData, size_t pcmSize) {  
+    int decibel = 0;  
+    double sum = 0;
+    for(int i = 0; i < pcmSize; i++)  {  
+        sum += pcmData[i] * pcmData[i]; //sum of values square
+    }  
+    return (int)(10 * log10(sum / (pcmSize * 32768 * 32768)));  //10*log10(RMS), root mean square
+} 
+
+int PCM2Decibel(const short *pcmData, size_t pcmSize) {  
+    int decibel = 0;  
+    double sum = 0;
+    for(int i = 0; i < pcmSize; i++)  {  
+        sum += abs(pcmData[i]); //sum of values
+    }  
+    return (int)(20.0 * log10(sum / pcmSize));  
+} 
+
+
+
+
+
+
+
+
 
 
 #if 0
@@ -191,9 +327,9 @@ void loop(void) {
   u8g2.setCursor(0, 25);
   u8g2.print("你好世界");		// Chinese "Hello World" 
   u8g2.sendBuffer();
- #endif
+#endif
 
- #if 0
+#if 0
   //u8g2.setFont(u8g2_font_ncenB08_tr); 
   u8g2.setFont(u8g2_font_logisoso16_tf); 
   //u8g2.setFontDirection(0);
@@ -204,7 +340,7 @@ void loop(void) {
   u8g2.sendBuffer();
   cp++;
   delay(1000);
- #endif
+#endif
    u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   u8g2.drawStr(0,10,"Hello World!");  // write something to the internal memory
