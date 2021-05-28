@@ -41,9 +41,13 @@ void setup()
     //PDM.begin(1, 16000);
 
     //初始化串口
-    Serial.begin(9600);
-    while (!Serial)
-        ;
+    // Serial.begin(9600);
+    // while (!Serial)
+    //     ;
+    //pinMode(12, INPUT_PULLUP);
+    u8g2.begin();
+    u8g2.setFont(u8g2_font_tenfatguys_tf);  // choose a suitable font
+    //u8g2.enableUTF8Print(); // enable UTF8 support for the Arduino print() function
 
     //麦克风音频初始化
     vPDM_init();
@@ -73,9 +77,6 @@ void setup()
         Serial.println("Error initializing APDS9960 sensor.");
 #endif
     }
-
-    u8g2.begin();
-    u8g2.enableUTF8Print(); // enable UTF8 support for the Arduino print() function
 }
 
 float f_tem = 0;
@@ -85,10 +86,18 @@ float f_press = 0;
 unsigned int ui_press = 0;
 unsigned int ui_decibel = 0;
 unsigned char uc_page = 0,sec_flag;
+
+void(* resetFunc) (void) = 0;
+
 void loop()
 {
     // put your main code here, to run repeatedly:
+    // if(digitalRead(12) == LOW)
+    // {
+    //     Serial.println("system reset");
+    //     resetFunc();
 
+    // }
     vGet_Temp_Hum_Val(&f_tem, &f_hum); //临时温湿度的读取
     vGet_Press(&f_press);              //临时气压值读取
     ui_press = uiGet_Bright();         //临时亮度读取 
@@ -189,7 +198,7 @@ unsigned int uiRGB2Bright(int r_val, int g_val, int b_val)
 void vDisplay_test()
 {
     u8g2.clearBuffer();                  // clear the internal memory
-    u8g2.setFont(u8g2_font_ncenB08_tr);  // choose a suitable font
+    // u8g2.setFont(u8g2_font_ncenB08_tr);  // choose a suitable font
     u8g2.drawStr(0, 10, "Hello World!"); // write something to the internal memory
     u8g2.sendBuffer();                   // transfer internal memory to the display
 }
@@ -218,22 +227,22 @@ void vDisplay_normal(unsigned char page,float tem, float hum, float press, unsig
     else if(page == 1)
     {
         sprintf(line0_buf,"press:");
-        sprintf(line1_buf,"              %.2f ",press);        
+        sprintf(line1_buf,"             %.2f ",press);        
     }
     else if(page == 2)
     {
         sprintf(line0_buf,"bright:");
-        sprintf(line1_buf,"                   %d ",bright);        
+        sprintf(line1_buf,"                 %d ",bright);        
     }
     else if(page == 3)
     {
         sprintf(line0_buf,"decibel:");
-        sprintf(line1_buf,"                   %d ",decibel);        
+        sprintf(line1_buf,"                 %d ",decibel);        
     }
 
     u8g2.clearBuffer();                  // clear the internal memory
     
-    u8g2.setFont(u8g2_font_tenfatguys_tf);  // choose a suitable font  //https://github.com/olikraus/u8g2/wiki/fntlistall
+    //u8g2.setFont(u8g2_font_tenfatguys_tf);  // choose a suitable font  //https://github.com/olikraus/u8g2/wiki/fntlistall
 
     u8g2.drawStr(0, 15, line0_buf); // write something to the internal memory
     u8g2.drawStr(0, 30, line1_buf);
